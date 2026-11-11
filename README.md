@@ -178,6 +178,28 @@ Google login (optional): create an OAuth 2.0 Client ID at `console.cloud.google.
 | `/api/community` | boards, post detail, new post, replies |
 | `/api/reviews` | own-to-review, helpful votes, dev response |
 | `/api/users/:username` | profile, library preview, own orders |
+| `/api/uploads` | raw-body image upload to GridFS (`kind=avatar\|game\|mod`), `GET /api/images/:id` serves it back |
+
+## Uploaded images (GridFS)
+
+Avatars, developer game covers and mod previews are stored in GridFS inside the
+same MongoDB database (`images.files` / `images.chunks`) — no bucket, no CDN, no
+second service. The code is identical against a local `mongod` and an Atlas
+cluster; only `MONGO_URI` changes.
+
+`POST /api/uploads?kind=avatar|game|mod` takes the file itself as the request
+body with `Content-Type: image/jpeg|image/png|image/webp|image/gif`; there is no
+multipart parser. The route sniffs the magic bytes (the header is only a claim),
+refuses SVG because these files are served from the app's own origin, and caps
+the size at 2 MB for avatars and 5 MB for covers and previews. It answers
+`{ url: '/api/images/<id>' }`, and `GET /api/images/:id` streams the file back
+with a one-year `immutable` cache header.
+
+The URL is relative so it survives being deployed behind any host, and because
+the schema fields are still plain strings, the absolute Steam / Shopify / Google
+URLs already in the database keep working untouched. Replacing an avatar deletes
+the previous GridFS object, so the 512 MB Atlas free tier does not fill with
+orphans.
 
 ## Run
 

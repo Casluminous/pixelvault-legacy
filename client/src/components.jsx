@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState, createContext, useContext } from 'react';
-import { api, priceOf } from './api.js';
+import { api, priceOf, uploadImage } from './api.js';
 import { BUILD } from './version.js';
 
 /* Fetches once on mount, so a page opened before a deployment finished
@@ -320,5 +320,37 @@ export function ToyCard({ t, i }) {
         <div className="price_row"><span className="plain_price">${t.price.toFixed(2)}</span></div>
       </div>
     </Link>
+  );
+}
+
+/* Uploads the moment a file is chosen and hands the stored URL back to the
+   parent. The parent owns the value, because an avatar is applied server-side
+   while a game cover is only written when the form is submitted. */
+export function ImagePicker({ kind, value, onChange, onRemove, label = 'Upload image', shape = 'wide' }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const pick = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    // Reset first, so choosing the same file twice still fires a change event.
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    setErr('');
+    try { onChange(await uploadImage(file, kind)); }
+    catch (ex) { setErr(ex.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="img-picker">
+      {value ? <img className={shape === 'avatar' ? 'round' : 'wide'} src={value} alt="" /> : null}
+      <label className="ghost-btn sm" style={{ cursor: busy ? 'default' : 'pointer' }}>
+        {busy ? 'Uploading…' : label}
+        <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={pick} disabled={busy} hidden />
+      </label>
+      {value && onRemove ? <button type="button" className="ghost-btn sm" onClick={onRemove}>Remove</button> : null}
+      {err && <span className="err tiny">{err}</span>}
+    </div>
   );
 }

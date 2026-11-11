@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api } from './api.js';
-import { useToast } from './components.jsx';
+import { useToast, ImagePicker } from './components.jsx';
 
 export function Login({ onLogin }) {
   const [err, setErr] = useState('');
@@ -126,7 +126,7 @@ export function Profile({ me }) {
     e.preventDefault();
     const f = new FormData(e.target);
     try {
-      await api('/users/me', { method: 'POST', body: { displayName: f.get('displayName'), phone: f.get('phone'), bio: f.get('bio'), avatar: f.get('avatar'), favoriteGenres: f.get('favoriteGenres'), matureFilter: f.get('matureFilter') === 'on' } });
+      await api('/users/me', { method: 'POST', body: { displayName: f.get('displayName'), phone: f.get('phone'), bio: f.get('bio'), favoriteGenres: f.get('favoriteGenres'), matureFilter: f.get('matureFilter') === 'on' } });
       setMsg('Profile saved!'); load();
     } catch (er) { setMsg(er.message); }
   };
@@ -142,6 +142,13 @@ export function Profile({ me }) {
     const r = await api('/users/me/addresses/' + id, { method: 'DELETE' });
     setD({ ...d, user: { ...d.user, addresses: r.addresses } });
   };
+  /* The upload endpoint already stored the file and pointed user.avatar at it,
+     so this only mirrors that in the local copy of the profile. */
+  const setAvatar = (url) => { setD((prev) => ({ ...prev, user: { ...prev.user, avatar: url } })); setMsg(url ? 'Avatar updated.' : 'Avatar removed.'); };
+  const dropAvatar = async () => {
+    try { await api('/users/me/avatar', { method: 'DELETE' }); setAvatar(''); }
+    catch (er) { setMsg(er.message); }
+  };
   return (<>
     <h1>{d.user.displayName || d.user.username}</h1>
     <p className="muted">@{d.user.username} · {d.user.email} {d.user.phone ? '· ' + d.user.phone : ''}</p>
@@ -152,7 +159,9 @@ export function Profile({ me }) {
         <div className="panel"><h3>Edit profile</h3>
           <form onSubmit={save} style={{ display: 'grid', gap: 8 }}>
             <input name="displayName" placeholder="Display name" defaultValue={d.user.displayName} />
-            <div className="row"><input name="phone" placeholder="Phone" defaultValue={d.user.phone} /><input name="avatar" placeholder="Avatar image URL" defaultValue={d.user.avatar} /></div>
+            <input name="phone" placeholder="Phone" defaultValue={d.user.phone} />
+            <ImagePicker kind="avatar" shape="avatar" label={d.user.avatar ? 'Change avatar' : 'Upload avatar'}
+              value={d.user.avatar} onChange={setAvatar} onRemove={dropAvatar} />
             <textarea name="bio" placeholder="Bio" defaultValue={d.user.bio} />
             <input name="favoriteGenres" placeholder="Favorite genres (comma separated)" defaultValue={(d.user.preferences?.favoriteGenres || []).join(', ')} />
             <label className="tiny"><input type="checkbox" name="matureFilter" defaultChecked={d.user.preferences?.matureFilter} /> Hide mature titles</label>
@@ -365,18 +374,20 @@ export function Dev() {
 
 export function DevNew() {
   const [msg, setMsg] = useState('');
+  const [cover, setCover] = useState('');
   const nav = useNavigate();
   const submit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     try {
-      const r = await api('/dev/new', { method: 'POST', body: { title: f.get('title'), tagline: f.get('tagline'), description: f.get('description'), studioName: f.get('studioName'), genres: f.get('genres'), tags: f.get('tags'), platforms: ['Windows'], coverImage: f.get('coverImage'), price: f.get('price'), discountPct: f.get('discountPct') } });
+      const r = await api('/dev/new', { method: 'POST', body: { title: f.get('title'), tagline: f.get('tagline'), description: f.get('description'), studioName: f.get('studioName'), genres: f.get('genres'), tags: f.get('tags'), platforms: ['Windows'], coverImage: cover || f.get('coverImage'), price: f.get('price'), discountPct: f.get('discountPct') } });
       nav('/games/' + r.slug);
     } catch (er) { setMsg(er.message); }
   };
   return <><h1>Publish a game</h1><form className="panel" onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
     <input name="title" placeholder="Title *" required /><input name="tagline" placeholder="Tagline" /><textarea name="description" placeholder="Description" />
-    <div className="row"><input name="studioName" placeholder="Studio" /><input name="coverImage" placeholder="Cover image URL" /></div>
+    <div className="row"><input name="studioName" placeholder="Studio" /><input name="coverImage" placeholder="…or paste a cover image URL" /></div>
+    <ImagePicker kind="game" label="Upload cover" value={cover} onChange={setCover} onRemove={() => setCover('')} />
     <div className="row"><input name="price" type="number" step="0.01" placeholder="Price *" required /><input name="discountPct" type="number" placeholder="% off" /><input name="genres" placeholder="Genres (comma)" /></div>
     <button className="cta-btn big">Publish</button></form>{msg && <p className="err">{msg}</p>}</>;
 }
@@ -570,6 +581,7 @@ export function Mods() {
   const [msg, setMsg] = useState('');
   const [q, setQ] = useState(() => Object.fromEntries(new URLSearchParams(window.location.search)));
   const [game, setGame] = useState('');
+  const [preview, setPreview] = useState('');
 
   useEffect(() => {
     setD(null);
@@ -584,8 +596,8 @@ export function Mods() {
     e.preventDefault();
     const f = new FormData(e.target);
     try {
-      await api('/mods/new', { method: 'POST', body: { game: f.get('game'), title: f.get('title'), description: f.get('description'), version: f.get('version'), downloadUrl: f.get('downloadUrl') } });
-      e.target.reset(); setD(await api('/mods')); setMsg('Mod published!');
+      await api('/mods/new', { method: 'POST', body: { game: f.get('game'), title: f.get('title'), description: f.get('description'), version: f.get('version'), downloadUrl: f.get('downloadUrl'), previewImage: preview } });
+      e.target.reset(); setPreview(''); setD(await api('/mods')); setMsg('Mod published!');
     } catch (er) { setMsg(er.message); }
   };
   if (!d) return <p className="muted">Loading…</p>;
@@ -639,6 +651,7 @@ export function Mods() {
           <input name="downloadUrl" placeholder="Download URL" />
         </div>
         <textarea name="description" placeholder="What does it do?" />
+        <ImagePicker kind="mod" label="Upload preview image" value={preview} onChange={setPreview} onRemove={() => setPreview('')} />
         <button className="cta-btn sm">Publish mod</button>
       </form>
       {msg && <p className="tiny">{msg}</p>}

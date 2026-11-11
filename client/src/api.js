@@ -34,3 +34,17 @@ export async function waitForDb(path = '/stats', tries = 40, gapMs = 1500) {
 }
 
 export const priceOf = (g) => +(g.price * (1 - (g.discountPct || 0) / 100)).toFixed(2);
+
+/* Uploads bypass api() on purpose: the body is the raw file, so the JSON
+   Content-Type and JSON.stringify wrapper would corrupt it. */
+export async function uploadImage(file, kind = 'avatar') {
+  const r = await fetch(`/api/uploads?kind=${encodeURIComponent(kind)}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': file.type },
+    body: file,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Upload failed (${r.status})`);
+  return data.url;
+}

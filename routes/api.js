@@ -18,6 +18,7 @@ const gateway = require('../lib/paymentGateway');
 const steamPrice = require('../lib/steamPrice');
 const loginLimiter = require('../lib/loginLimiter');
 const cache = require('../lib/cache');
+const storage = require('../lib/storage');
 
 const router = express.Router();
 
@@ -1210,10 +1211,70 @@ router.post('/mods/new', needLogin, async (req, res) => {
     description: String(description || '').slice(0, 4000), author: req.session.user._id,
     // left unset when the uploader does not supply one — no placeholder version
     version: String(version || '').trim() || undefined, downloadUrl: downloadUrl || '',
+    previewImage: String(req.body.previewImage || '').slice(0, 500),
     tags: Array.isArray(tags) ? tags : String(tags || '').split(',').map((s) => s.trim()).filter(Boolean),
     status: 'published',
   });
   res.json({ ok: true, id: m._id });
+});
+
+// ---------- image uploads (GridFS) ----------
+/* The request body *is* the image; no multipart parser is involved. Express
+   hands us a Buffer for the four types below and leaves every other request
+   untouched, so the JSON routes are unaffected. */
+const IMAGE_RAW = express.raw({
+  type: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  limit: '6mb',
+});
+
+router.post('/uploads', needLogin, IMAGE_RAW, async (req, res) => {
+  try {
+    const kind = String(req.query.kind || 'avatar').toLowerCase();
+    if (!storage.KINDS[kind]) return res.status(400).json({ error: 'kind must be avatar, game or mod.' });
+    const saved = await storage.putImage(req.body, { kind, ownerId: req.session.user._id });
+    /* An avatar is the one upload that is also a profile field, so it is applied
+       here — one request instead of upload-then-save. The replaced file is
+       removed so the 512 MB Atlas quota does not fill with orphans. */
+    if (kind === 'avatar') {
+      const user = await User.findById(req.session.user._id).select('avatar');
+      const previous = user.avatar;
+      user.avatar = saved.url;
+      await user.save();
+      const stale = storage.idFromUrl(previous);
+      if (stale) await storage.deleteImage(stale);
+    }
+    res.json({ ok: true, url: saved.url });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+router.delete('/users/me/avatar', needLogin, async (req, res) => {
+  const user = await User.findById(req.session.user._id).select('avatar');
+  const stale = storage.idFromUrl(user.avatar);
+  user.avatar = '';
+  await user.save();
+  if (stale) await storage.deleteImage(stale);
+  res.json({ ok: true });
+});
+
+/* Public on purpose: an <img> tag carries no session. The long cache is safe
+   because a GridFS id never changes content — replacing an avatar produces a
+   new id, so a stale cache entry can only ever point at a dead file. */
+router.get('/images/:id', async (req, res) => {
+  try {
+    const img = await storage.openImage(req.params.id);
+    res.setHeader('Content-Type', img.contentType);
+    if (Number.isFinite(img.length)) res.setHeader('Content-Length', String(img.length));
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    img.stream.on('error', () => {
+      if (!res.headersSent) res.status(404);
+      res.end();
+    });
+    img.stream.pipe(res);
+  } catch (e) {
+    res.status(e.status || 404).json({ error: e.message });
+  }
 });
 
 // ---------- admin ----------
